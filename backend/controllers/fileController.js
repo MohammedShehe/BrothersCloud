@@ -4,9 +4,9 @@ const cloudinary = require('cloudinary').v2;
 const fs = require('fs');
 const mime = require('mime-types');
 const path = require('path');
-const fetch = require('node-fetch');
+const axios = require('axios');
 
-// 🔹 Cloudinary Config (env-based)
+// 🔹 Cloudinary Config
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
@@ -19,11 +19,11 @@ cloudinary.config({
 function getResourceType(mime_type, file_type) {
   const mt = (mime_type || '').toLowerCase();
   const ft = (file_type || '').toLowerCase();
-  
+
   if (ft === 'image') return 'image';
   if (ft === 'video') return 'video';
-  
-  // All documents should be treated as 'raw'
+
+  // Docs & PDFs → raw
   if (
     mt === 'application/pdf' ||
     mt.includes('msword') ||
@@ -36,8 +36,8 @@ function getResourceType(mime_type, file_type) {
   ) {
     return 'raw';
   }
-  
-  return 'raw'; // default to raw
+
+  return 'raw';
 }
 
 function safeAttachmentName(name = 'file') {
@@ -45,31 +45,10 @@ function safeAttachmentName(name = 'file') {
   return base || 'file';
 }
 
-/**
- * Build a clean inline Cloudinary delivery URL
- */
 function buildViewUrl(file) {
-  const { cloud_id, cloudinary_url, file_type, mime_type, file_name } = file;
-  const mt = mime_type || mime.lookup(file_name) || 'application/octet-stream';
+  const { cloud_id, cloudinary_url, file_type, mime_type } = file;
+  const mt = mime_type || 'application/octet-stream';
   const resource_type = getResourceType(mt, file_type);
-
-  // For raw files (documents), we need to specify format
-  if (resource_type === 'raw' && cloud_id) {
-    let format;
-    if (mt === 'application/pdf') {
-      format = 'pdf';
-    } else {
-      const ext = path.extname(file_name || '').slice(1).toLowerCase();
-      if (ext) format = ext;
-    }
-    
-    return cloudinary.url(cloud_id, {
-      resource_type: 'raw',
-      type: 'upload',
-      secure: true,
-      ...(format ? { format } : {}),
-    });
-  }
 
   if (cloud_id) {
     return cloudinary.url(cloud_id, {
@@ -78,58 +57,38 @@ function buildViewUrl(file) {
       secure: true,
     });
   }
-  
+
   return cloudinary_url;
 }
 
-/**
- * Build a download URL that forces attachment
- */
 function buildDownloadUrl(file) {
   const { cloud_id, file_type, mime_type, file_name } = file;
   const mt = mime_type || mime.lookup(file_name) || 'application/octet-stream';
   const resource_type = getResourceType(mt, file_type);
   const attachmentName = safeAttachmentName(file_name);
 
-  // For raw files, ensure we use the correct resource type
-  if (resource_type === 'raw') {
-    let format;
-    if (mt === 'application/pdf') {
-      format = 'pdf';
-    } else {
-      const ext = path.extname(file_name || '').slice(1).toLowerCase();
-      if (ext) format = ext;
-    }
-
+  if (cloud_id) {
     return cloudinary.url(cloud_id, {
-      resource_type: 'raw',
+      resource_type,
       type: 'upload',
       flags: 'attachment',
       attachment: attachmentName,
       secure: true,
-      ...(format ? { format } : {}),
     });
   }
 
-  return cloudinary.url(cloud_id, {
-    resource_type,
-    type: 'upload',
-    flags: 'attachment',
-    attachment: attachmentName,
-    secure: true,
-  });
+  return null;
 }
 
 /* ===========================
-   Upload - FIXED FOR DOCUMENTS
+   Upload
 =========================== */
 exports.uploadFile = async (req, res) => {
   try {
     const user_id = req.user.user_id;
-    const file_type_raw = req.body.file_type || '';
+    const file_type = (req.body.file_type || '').trim().toLowerCase();
     const file_name = req.body.file_name;
     const file_description = req.body.file_description || '';
-    const file_type = file_type_raw.trim().toLowerCase();
 
     if (!file_type || !file_name) {
       return res.status(400).json({ message: 'file_type and file_name are required' });
@@ -138,15 +97,10 @@ exports.uploadFile = async (req, res) => {
       return res.status(400).json({ message: 'File is required' });
     }
 
-    let file_url = null;
-    let public_id = null;
-    let file_size = null;
-    let mime_type = null;
+    let file_url = null, public_id = null, file_size = null, mime_type = null;
 
     if (req.file && file_type !== 'event') {
       mime_type = req.file.mimetype || mime.lookup(file_name) || 'application/octet-stream';
-      
-      // Determine correct resource type for Cloudinary
       const resource_type = getResourceType(mime_type, file_type);
 
       const folder =
@@ -158,22 +112,14 @@ exports.uploadFile = async (req, res) => {
           ? 'brotherscloud/videos'
           : 'brotherscloud/raw';
 
-      // Upload options
-      const uploadOptions = {
+      const uploadResult = await cloudinary.uploader.upload(req.file.path, {
         folder,
         resource_type,
         use_filename: true,
         unique_filename: true,
         overwrite: false,
         access_mode: 'public',
-      };
-
-      // For raw files, explicitly set the resource type
-      if (resource_type === 'raw') {
-        uploadOptions.resource_type = 'raw';
-      }
-
-      const uploadResult = await cloudinary.uploader.upload(req.file.path, uploadOptions);
+      });
 
       file_url = uploadResult.secure_url;
       public_id = uploadResult.public_id;
@@ -195,7 +141,6 @@ exports.uploadFile = async (req, res) => {
     });
 
     const newFile = await FileModel.getById(id);
-
     const viewUrl = buildViewUrl(newFile);
     const downloadUrl = newFile.cloud_id ? buildDownloadUrl(newFile) : null;
 
@@ -245,7 +190,7 @@ exports.getFileById = async (req, res) => {
 };
 
 /* ===========================
-   View - FIXED FOR PDFs
+   View
 =========================== */
 exports.viewFile = async (req, res) => {
   try {
@@ -258,28 +203,22 @@ exports.viewFile = async (req, res) => {
     const mt = file.mime_type || mime.lookup(file.file_name) || 'application/octet-stream';
     const ext = path.extname(file.file_name || '').toLowerCase();
 
-    // For PDFs, use direct streaming approach
+    // PDFs → stream inline
     if (mt === 'application/pdf' || ext === '.pdf') {
       try {
-        const response = await fetch(viewUrl);
-        if (!response.ok) {
-          throw new Error('Failed to fetch PDF from Cloudinary');
-        }
+        const response = await axios.get(viewUrl, { responseType: 'stream' });
 
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', `inline; filename="${safeAttachmentName(file.file_name)}"`);
-        
-        // Pipe the response directly to the client
-        response.body.pipe(res);
+        response.data.pipe(res);
         return;
-      } catch (fetchError) {
-        console.error('[PDF View Fetch Error]', fetchError);
-        // Fall back to redirect
+      } catch (err) {
+        console.error('[PDF Stream Error]', err);
         return res.redirect(viewUrl);
       }
     }
 
-    // Office documents use Google Docs viewer
+    // Office docs → Google Docs Viewer with download button
     if (['.doc', '.docx', '.ppt', '.pptx', '.xls', '.xlsx'].includes(ext)) {
       const gviewUrl = `https://docs.google.com/gview?url=${encodeURIComponent(viewUrl)}&embedded=true`;
       const downloadUrl = file.cloud_id ? buildDownloadUrl(file) : viewUrl;
@@ -295,7 +234,7 @@ exports.viewFile = async (req, res) => {
             body { display:flex; flex-direction:column; }
             .topbar { background:#222; padding:10px; display:flex; justify-content:space-between; align-items:center; }
             .topbar a { background:#4CAF50; color:#fff; padding:8px 12px; text-decoration:none; border-radius:6px; }
-            .topbar span { color:#fff; }
+            .topbar span { color:#fff; font-weight:bold; }
             iframe { flex:1; border:none; width:100%; }
           </style>
         </head>
@@ -310,7 +249,7 @@ exports.viewFile = async (req, res) => {
       `);
     }
 
-    // Images, videos → direct inline URL
+    // Images, videos → inline
     return res.redirect(viewUrl);
   } catch (err) {
     console.error('[View Error]', err);
@@ -319,7 +258,7 @@ exports.viewFile = async (req, res) => {
 };
 
 /* ===========================
-   Download - FIXED FOR PDFs
+   Download
 =========================== */
 exports.downloadFile = async (req, res) => {
   try {
@@ -330,44 +269,28 @@ exports.downloadFile = async (req, res) => {
     const mt = file.mime_type || mime.lookup(file.file_name) || 'application/octet-stream';
     const attachmentName = safeAttachmentName(file.file_name);
 
-    // For PDFs, use direct streaming for reliable downloads
+    // PDFs → stream download
     if (mt === 'application/pdf') {
       try {
         const viewUrl = buildViewUrl(file);
-        const response = await fetch(viewUrl);
-        
-        if (!response.ok) {
-          throw new Error('Failed to fetch PDF from Cloudinary');
-        }
+        const response = await axios.get(viewUrl, { responseType: 'stream' });
 
         res.setHeader('Content-Disposition', `attachment; filename="${attachmentName}"`);
         res.setHeader('Content-Type', 'application/pdf');
-        
-        // Get content length if available
-        const contentLength = response.headers.get('content-length');
-        if (contentLength) {
-          res.setHeader('Content-Length', contentLength);
+        if (response.headers['content-length']) {
+          res.setHeader('Content-Length', response.headers['content-length']);
         }
-        
-        // Stream the file directly
-        response.body.pipe(res);
+
+        response.data.pipe(res);
         return;
-      } catch (fetchError) {
-        console.error('[PDF Download Fetch Error]', fetchError);
-        // Fall back to Cloudinary URL with proper raw resource type
-        const fallbackUrl = cloudinary.url(file.cloud_id, {
-          resource_type: 'raw',
-          type: 'upload',
-          flags: 'attachment',
-          attachment: attachmentName,
-          secure: true,
-          format: 'pdf'
-        });
+      } catch (err) {
+        console.error('[PDF Download Error]', err);
+        const fallbackUrl = buildDownloadUrl(file);
         return res.redirect(fallbackUrl);
       }
     }
 
-    // For non-PDF files, use standard approach
+    // Others → force download
     const downloadUrl = buildDownloadUrl(file);
     return res.redirect(downloadUrl);
   } catch (err) {

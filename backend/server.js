@@ -3,6 +3,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const birthdayRoutes = require('./routes/birthdayRoutes');
 
 const db = require('./config/db'); // MySQL connection
 
@@ -35,6 +36,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/files', fileRoutes);
 app.use('/api/events', eventRoutes);
 app.use('/api/search', searchRoutes);
+app.use('/api/birthdays', birthdayRoutes);
 
 // Test route
 app.get('/', (req, res) => {

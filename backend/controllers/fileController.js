@@ -253,7 +253,7 @@ exports.viewFile = async (req, res) => {
     return res.redirect(viewUrl);
   } catch (err) {
     console.error('[View Error]', err);
-    return res.status(500).json({ message: 'Server error' });
+    return res.status(500).json({ message: 'Server error', error: err.message});
   }
 };
 
@@ -295,7 +295,7 @@ exports.downloadFile = async (req, res) => {
     return res.redirect(downloadUrl);
   } catch (err) {
     console.error('[Download Error]', err);
-    return res.status(500).json({ message: 'Server error' });
+    return res.status(500).json({ message: 'Server error', error: err.message});
   }
 };
 
@@ -318,6 +318,6 @@ exports.deleteFile = async (req, res) => {
     return res.json({ message: 'File deleted successfully' });
   } catch (err) {
     console.error('[Delete Error]', err);
-    return res.status(500).json({ message: 'Server error' });
+    return res.status(500).json({ message: 'Server error', error: err.message});
   }
 };

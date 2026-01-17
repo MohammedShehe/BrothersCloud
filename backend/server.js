@@ -14,6 +14,7 @@ const eventRoutes = require('./routes/eventRoutes');
 const searchRoutes = require('./routes/searchRoutes');
 const cron = require("node-cron");
 const checkEventsAndNotify = require("./utils/notifier");
+const fbscRoutes = require('./routes/fbscRoutes');
 
 const app = express();
 
@@ -37,6 +38,7 @@ app.use('/api/files', fileRoutes);
 app.use('/api/events', eventRoutes);
 app.use('/api/search', searchRoutes);
 app.use('/api/birthdays', birthdayRoutes);
+app.use('/api/fbsc', fbscRoutes);
 
 // Test route
 app.get('/', (req, res) => {

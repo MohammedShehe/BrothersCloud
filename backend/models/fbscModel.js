@@ -18,33 +18,37 @@ class FBSCModel {
     const params = [];
 
     if (user_id) {
-      clauses.push('user_id = ?');
+      clauses.push('r.user_id = ?');
       params.push(user_id);
     }
 
     if (from) {
-      clauses.push('record_date >= ?');
+      clauses.push('r.record_date >= ?');
       params.push(from);
     }
 
     if (to) {
-      clauses.push('record_date <= ?');
+      clauses.push('r.record_date <= ?');
       params.push(to);
     }
 
     if (product && product !== 'all') {
-      clauses.push('product = ?');
+      clauses.push('r.product = ?');
       params.push(product);
     }
 
     if (search) {
-      clauses.push('(customer_name LIKE ? OR product LIKE ? OR notes LIKE ?)');
+      clauses.push('(r.customer_name LIKE ? OR r.product LIKE ? OR r.notes LIKE ?)');
       const likeSearch = `%${search}%`;
       params.push(likeSearch, likeSearch, likeSearch);
     }
 
     // Get total count for pagination
-    const countSql = `SELECT COUNT(*) as total FROM fbsc_records WHERE ${clauses.join(' AND ')}`;
+    const countSql = `
+      SELECT COUNT(*) as total 
+      FROM fbsc_records r
+      WHERE ${clauses.join(' AND ')}
+    `;
     const [countResult] = await db.query(countSql, params);
     const total = countResult[0]?.total || 0;
 
@@ -54,7 +58,7 @@ class FBSCModel {
       FROM fbsc_records r
       LEFT JOIN users u ON r.user_id = u.user_id
       WHERE ${clauses.join(' AND ')}
-      ORDER BY record_date DESC, created_at DESC
+      ORDER BY r.record_date DESC, r.created_at DESC
       LIMIT ? OFFSET ?
     `;
 
@@ -115,17 +119,17 @@ class FBSCModel {
     const params = [];
 
     if (user_id) {
-      whereClause += ' AND user_id = ?';
+      whereClause += ' AND r.user_id = ?';
       params.push(user_id);
     }
 
     if (from) {
-      whereClause += ' AND record_date >= ?';
+      whereClause += ' AND r.record_date >= ?';
       params.push(from);
     }
 
     if (to) {
-      whereClause += ' AND record_date <= ?';
+      whereClause += ' AND r.record_date <= ?';
       params.push(to);
     }
 
@@ -133,11 +137,11 @@ class FBSCModel {
     const [revenueStats] = await db.query(
       `SELECT 
         COUNT(*) as total_orders,
-        SUM(price) as total_revenue,
-        AVG(price) as avg_order_value,
-        MIN(record_date) as earliest_date,
-        MAX(record_date) as latest_date
-       FROM fbsc_records 
+        SUM(r.price) as total_revenue,
+        AVG(r.price) as avg_order_value,
+        MIN(r.record_date) as earliest_date,
+        MAX(r.record_date) as latest_date
+       FROM fbsc_records r
        WHERE ${whereClause}`,
       params
     );
@@ -145,12 +149,12 @@ class FBSCModel {
     // Get top products
     const [topProducts] = await db.query(
       `SELECT 
-        product,
+        r.product,
         COUNT(*) as order_count,
-        SUM(price) as revenue
-       FROM fbsc_records 
+        SUM(r.price) as revenue
+       FROM fbsc_records r
        WHERE ${whereClause}
-       GROUP BY product
+       GROUP BY r.product
        ORDER BY revenue DESC
        LIMIT 10`,
       params
@@ -159,12 +163,12 @@ class FBSCModel {
     // Get monthly trend
     const [monthlyTrend] = await db.query(
       `SELECT 
-        DATE_FORMAT(record_date, '%Y-%m') as month,
+        DATE_FORMAT(r.record_date, '%Y-%m') as month,
         COUNT(*) as orders,
-        SUM(price) as revenue
-       FROM fbsc_records 
+        SUM(r.price) as revenue
+       FROM fbsc_records r
        WHERE ${whereClause}
-       GROUP BY DATE_FORMAT(record_date, '%Y-%m')
+       GROUP BY DATE_FORMAT(r.record_date, '%Y-%m')
        ORDER BY month DESC
        LIMIT 12`,
       params

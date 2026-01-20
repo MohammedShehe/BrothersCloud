@@ -133,16 +133,16 @@ class FBSCModel {
       params.push(to);
     }
 
-    // Get revenue statistics
+    // Get revenue statistics - use COALESCE to handle NULL values
     const [revenueStats] = await db.query(
       `SELECT 
         COUNT(*) as total_orders,
-        SUM(r.price) as total_revenue,
-        AVG(r.price) as avg_order_value,
+        COALESCE(SUM(r.price), 0) as total_revenue,
+        COALESCE(AVG(r.price), 0) as avg_order_value,
         MIN(r.record_date) as earliest_date,
         MAX(r.record_date) as latest_date
-       FROM fbsc_records r
-       WHERE ${whereClause}`,
+      FROM fbsc_records r
+      WHERE ${whereClause}`,
       params
     );
 
@@ -151,12 +151,12 @@ class FBSCModel {
       `SELECT 
         r.product,
         COUNT(*) as order_count,
-        SUM(r.price) as revenue
-       FROM fbsc_records r
-       WHERE ${whereClause}
-       GROUP BY r.product
-       ORDER BY revenue DESC
-       LIMIT 10`,
+        COALESCE(SUM(r.price), 0) as revenue
+      FROM fbsc_records r
+      WHERE ${whereClause}
+      GROUP BY r.product
+      ORDER BY revenue DESC
+      LIMIT 10`,
       params
     );
 
@@ -165,19 +165,25 @@ class FBSCModel {
       `SELECT 
         DATE_FORMAT(r.record_date, '%Y-%m') as month,
         COUNT(*) as orders,
-        SUM(r.price) as revenue
-       FROM fbsc_records r
-       WHERE ${whereClause}
-       GROUP BY DATE_FORMAT(r.record_date, '%Y-%m')
-       ORDER BY month DESC
-       LIMIT 12`,
+        COALESCE(SUM(r.price), 0) as revenue
+      FROM fbsc_records r
+      WHERE ${whereClause}
+      GROUP BY DATE_FORMAT(r.record_date, '%Y-%m')
+      ORDER BY month DESC
+      LIMIT 12`,
       params
     );
 
     return {
-      revenue: revenueStats[0] || {},
-      topProducts,
-      monthlyTrend
+      revenue: revenueStats[0] || {
+        total_orders: 0,
+        total_revenue: 0,
+        avg_order_value: 0,
+        earliest_date: null,
+        latest_date: null
+      },
+      topProducts: topProducts || [],
+      monthlyTrend: monthlyTrend || []
     };
   }
 
